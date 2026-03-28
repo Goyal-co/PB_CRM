@@ -5,7 +5,7 @@ export interface User {
   username: string;
   name: string;
   email: string;
-  role: 'admin' | 'customer';
+  role: 'admin' | 'agent' | 'manager';
   initials: string;
   avatarColor: string;
 }
@@ -29,13 +29,23 @@ const USERS: (User & { password: string })[] = [
   },
   {
     id: '2',
-    username: 'customer',
-    password: 'cust123',
+    username: 'agent',
+    password: 'agent123',
     name: 'Rahul Sharma',
     email: 'rahul@realestate.com',
-    role: 'customer',
+    role: 'agent',
     initials: 'RS',
     avatarColor: 'bg-purple-600',
+  },
+  {
+    id: '3',
+    username: 'manager',
+    password: 'manager123',
+    name: 'Manager User',
+    email: 'manager@realestate.com',
+    role: 'manager',
+    initials: 'MU',
+    avatarColor: 'bg-green-600',
   },
 ];
 

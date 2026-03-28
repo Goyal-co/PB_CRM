@@ -1,5 +1,6 @@
 import React from 'react';
 import { NavLink } from 'react-router-dom';
+import { useAuth } from '../../context/AuthContext';
 import {
   LayoutDashboard,
   BookOpen,
@@ -12,18 +13,22 @@ import {
   Settings,
   X,
   Building2,
+  ClipboardList,
+  List,
 } from 'lucide-react';
 
 const navItems = [
-  { path: '/', label: 'Dashboard', icon: LayoutDashboard },
-  { path: '/bookings', label: 'New Bookings', icon: BookOpen },
-  { path: '/agreements', label: 'Agreements', icon: FileText },
-  { path: '/customers', label: 'Customers', icon: Users },
-  { path: '/construction', label: 'Construction Updates', icon: HardHat },
-  { path: '/payment-requests', label: 'Payment Requests', icon: CreditCard },
-  { path: '/payment-tracking', label: 'Payment Tracking', icon: TrendingUp },
-  { path: '/templates', label: 'Templates', icon: Layout },
-  { path: '/settings', label: 'Settings', icon: Settings },
+  { path: '/', label: 'Dashboard', icon: LayoutDashboard, roles: ['admin', 'manager', 'agent'] },
+  { path: '/booking-form', label: 'Booking Form', icon: ClipboardList, roles: ['agent'] },
+  { path: '/my-bookings', label: 'My Bookings', icon: List, roles: ['agent'] },
+  { path: '/bookings', label: 'New Bookings', icon: BookOpen, roles: ['admin', 'manager'] },
+  { path: '/agreements', label: 'Agreements', icon: FileText, roles: ['admin', 'manager'] },
+  { path: '/customers', label: 'Customers', icon: Users, roles: ['admin', 'manager'] },
+  { path: '/construction', label: 'Construction Updates', icon: HardHat, roles: ['admin', 'manager'] },
+  { path: '/payment-requests', label: 'Payment Requests', icon: CreditCard, roles: ['admin', 'manager'] },
+  { path: '/payment-tracking', label: 'Payment Tracking', icon: TrendingUp, roles: ['admin', 'manager'] },
+  { path: '/templates', label: 'Templates', icon: Layout, roles: ['admin'] },
+  { path: '/settings', label: 'Settings', icon: Settings, roles: ['admin', 'manager', 'agent'] },
 ];
 
 interface SidebarProps {
@@ -31,6 +36,12 @@ interface SidebarProps {
 }
 
 const Sidebar: React.FC<SidebarProps> = ({ onClose }) => {
+  const { currentUser } = useAuth();
+  
+  const filteredNavItems = navItems.filter(item => 
+    currentUser && item.roles.includes(currentUser.role)
+  );
+
   return (
     <aside className="w-56 h-full bg-white border-r border-gray-200 flex flex-col">
       <div className="px-4 py-4 border-b border-gray-100 flex items-center justify-between">
@@ -51,7 +62,7 @@ const Sidebar: React.FC<SidebarProps> = ({ onClose }) => {
         </button>
       </div>
       <nav className="flex-1 py-3 px-2 overflow-y-auto">
-        {navItems.map(({ path, label, icon: Icon }) => (
+        {filteredNavItems.map(({ path, label, icon: Icon }) => (
           <NavLink
             key={path}
             to={path}

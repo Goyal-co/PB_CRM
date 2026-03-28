@@ -134,11 +134,19 @@ const Login: React.FC = () => {
               </button>
               <button
                 type="button"
-                onClick={() => fillCredentials('customer', 'cust123')}
+                onClick={() => fillCredentials('agent', 'agent123')}
                 className="p-3 bg-purple-50 hover:bg-purple-100 border border-purple-100 rounded-xl text-left transition-colors"
               >
-                <p className="text-xs font-bold text-purple-700">Customer</p>
-                <p className="text-xs text-purple-500 mt-0.5 font-mono">customer / cust123</p>
+                <p className="text-xs font-bold text-purple-700">Agent</p>
+                <p className="text-xs text-purple-500 mt-0.5 font-mono">agent / agent123</p>
+              </button>
+              <button
+                type="button"
+                onClick={() => fillCredentials('manager', 'manager123')}
+                className="p-3 bg-green-50 hover:bg-green-100 border border-green-100 rounded-xl text-left transition-colors col-span-2"
+              >
+                <p className="text-xs font-bold text-green-700">Manager</p>
+                <p className="text-xs text-green-500 mt-0.5 font-mono">manager / manager123</p>
               </button>
             </div>
           </div>

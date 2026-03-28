@@ -159,10 +159,12 @@ const TopBar: React.FC<TopBarProps> = ({ onMenuClick }) => {
                       className={`inline-block mt-1 px-2 py-0.5 rounded-full text-xs font-semibold ${
                         currentUser?.role === 'admin'
                           ? 'bg-blue-100 text-blue-700'
+                          : currentUser?.role === 'manager'
+                          ? 'bg-green-100 text-green-700'
                           : 'bg-purple-100 text-purple-700'
                       }`}
                     >
-                      {currentUser?.role === 'admin' ? 'Administrator' : 'Customer'}
+                      {currentUser?.role === 'admin' ? 'Administrator' : currentUser?.role === 'manager' ? 'Manager' : 'Agent'}
                     </span>
                   </div>
                 </div>

@@ -3,6 +3,8 @@ import { AuthProvider, useAuth } from './context/AuthContext';
 import AppLayout from './components/layout/AppLayout';
 import Login from './pages/Login';
 import Dashboard from './pages/Dashboard';
+import BookingForm from './pages/BookingForm';
+import MyBookings from './pages/MyBookings';
 import NewBookings from './pages/NewBookings';
 import Agreements from './pages/Agreements';
 import Customers from './pages/Customers';
@@ -30,6 +32,8 @@ function AppRoutes() {
       <Route path="/login" element={<PublicLogin />} />
       <Route element={<ProtectedLayout />}>
         <Route path="/" element={<Dashboard />} />
+        <Route path="/booking-form" element={<BookingForm />} />
+        <Route path="/my-bookings" element={<MyBookings />} />
         <Route path="/bookings" element={<NewBookings />} />
         <Route path="/agreements" element={<Agreements />} />
         <Route path="/customers" element={<Customers />} />
