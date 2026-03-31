@@ -18,17 +18,20 @@ import {
 } from 'lucide-react';
 
 const navItems = [
-  { path: '/', label: 'Dashboard', icon: LayoutDashboard, roles: ['admin', 'manager', 'agent'] },
-  { path: '/booking-form', label: 'Booking Form', icon: ClipboardList, roles: ['agent'] },
-  { path: '/my-bookings', label: 'My Bookings', icon: List, roles: ['agent'] },
-  { path: '/bookings', label: 'New Bookings', icon: BookOpen, roles: ['admin', 'manager'] },
-  { path: '/agreements', label: 'Agreements', icon: FileText, roles: ['admin', 'manager'] },
-  { path: '/customers', label: 'Customers', icon: Users, roles: ['admin', 'manager'] },
-  { path: '/construction', label: 'Construction Updates', icon: HardHat, roles: ['admin', 'manager'] },
-  { path: '/payment-requests', label: 'Payment Requests', icon: CreditCard, roles: ['admin', 'manager'] },
-  { path: '/payment-tracking', label: 'Payment Tracking', icon: TrendingUp, roles: ['admin', 'manager'] },
-  { path: '/templates', label: 'Templates', icon: Layout, roles: ['admin'] },
-  { path: '/settings', label: 'Settings', icon: Settings, roles: ['admin', 'manager', 'agent'] },
+  { path: '/', label: 'Dashboard', icon: LayoutDashboard, roles: ['super_admin', 'manager', 'user'] },
+  { path: '/projects', label: 'Projects', icon: Building2, roles: ['super_admin', 'manager'] },
+  { path: '/units', label: 'Units', icon: Layout, roles: ['super_admin', 'manager'] },
+  { path: '/users', label: 'Users', icon: Users, roles: ['super_admin'] },
+  { path: '/booking-form', label: 'Booking Form', icon: ClipboardList, roles: ['user'] },
+  { path: '/my-bookings', label: 'My Bookings', icon: List, roles: ['user'] },
+  { path: '/bookings', label: 'New Bookings', icon: BookOpen, roles: ['super_admin', 'manager'] },
+  { path: '/agreements', label: 'Agreements', icon: FileText, roles: ['super_admin', 'manager'] },
+  { path: '/customers', label: 'Customers', icon: Users, roles: ['super_admin', 'manager'] },
+  { path: '/construction', label: 'Construction Updates', icon: HardHat, roles: ['super_admin', 'manager'] },
+  { path: '/payment-requests', label: 'Payment Requests', icon: CreditCard, roles: ['super_admin', 'manager'] },
+  { path: '/payment-tracking', label: 'Payment Tracking', icon: TrendingUp, roles: ['super_admin', 'manager'] },
+  { path: '/templates', label: 'Templates', icon: FileText, roles: ['super_admin'] },
+  { path: '/settings', label: 'Settings', icon: Settings, roles: ['super_admin', 'manager', 'user'] },
 ];
 
 interface SidebarProps {

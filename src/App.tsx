@@ -3,6 +3,10 @@ import { AuthProvider, useAuth } from './context/AuthContext';
 import AppLayout from './components/layout/AppLayout';
 import Login from './pages/Login';
 import Dashboard from './pages/Dashboard';
+import Projects from './pages/Projects';
+import Units from './pages/Units';
+import Users from './pages/Users';
+import GetBackendIds from './pages/GetBackendIds';
 import BookingForm from './pages/BookingForm';
 import MyBookings from './pages/MyBookings';
 import NewBookings from './pages/NewBookings';
@@ -32,6 +36,10 @@ function AppRoutes() {
       <Route path="/login" element={<PublicLogin />} />
       <Route element={<ProtectedLayout />}>
         <Route path="/" element={<Dashboard />} />
+        <Route path="/projects" element={<Projects />} />
+        <Route path="/units" element={<Units />} />
+        <Route path="/users" element={<Users />} />
+        <Route path="/get-ids" element={<GetBackendIds />} />
         <Route path="/booking-form" element={<BookingForm />} />
         <Route path="/my-bookings" element={<MyBookings />} />
         <Route path="/bookings" element={<NewBookings />} />

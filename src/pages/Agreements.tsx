@@ -1,32 +1,61 @@
-import React, { useState } from 'react';
-import { Filter, Eye, Printer, CheckCircle, RefreshCw, Copy, X } from 'lucide-react';
-import { agreements as initialAgreements } from '../data/mockData';
+import React, { useState, useEffect } from 'react';
+import { Filter, Eye, Printer, CheckCircle, RefreshCw, Copy, X, Loader2 } from 'lucide-react';
 import { Badge } from '../components/ui/Badge';
 import Modal from '../components/ui/Modal';
 import Toast from '../components/ui/Toast';
-
-type Agreement = typeof initialAgreements[0];
+import { bookingService, type Booking } from '../services/bookingService';
 
 const Agreements: React.FC = () => {
-  const [agreements, setAgreements] = useState(initialAgreements);
-  const [viewAgreement, setViewAgreement] = useState<Agreement | null>(null);
+  const [agreements, setAgreements] = useState<Booking[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [viewAgreement, setViewAgreement] = useState<Booking | null>(null);
   const [showFilter, setShowFilter] = useState(false);
   const [filterStatus, setFilterStatus] = useState('All');
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
 
-  const updateStatus = (id: string, status: string) => {
-    setAgreements(prev => prev.map(a => a.id === id ? { ...a, status } : a));
-    setToast({ message: `Agreement ${status === 'Approved' ? 'approved' : 'sent for rework'} successfully.`, type: 'success' });
-    setViewAgreement(null);
+  useEffect(() => {
+    const fetchAgreements = async () => {
+      try {
+        setLoading(true);
+        const data = await bookingService.getAll({ status: 'approved' });
+        setAgreements(data);
+      } catch (error) {
+        console.error('Failed to fetch agreements:', error);
+        setToast({ message: 'Failed to load agreements', type: 'error' });
+      } finally {
+        setLoading(false);
+      }
+    };
+    fetchAgreements();
+  }, []);
+
+  const updateStatus = async (id: string, newStatus: string) => {
+    try {
+      // This would call an API to update agreement status
+      setAgreements(prev => prev.map(a => a.id === id ? { ...a, status: newStatus as any } : a));
+      setToast({ message: `Agreement updated successfully.`, type: 'success' });
+      setViewAgreement(null);
+    } catch (error) {
+      console.error('Failed to update agreement:', error);
+      setToast({ message: 'Failed to update agreement', type: 'error' });
+    }
   };
 
-  const underReview = agreements.filter(a => a.status === 'Under Review').length;
-  const approved = agreements.filter(a => a.status === 'Approved').length;
-  const rework = agreements.filter(a => a.status === 'Rework').length;
+  const underReview = agreements.filter(a => a.status === 'under_review').length;
+  const approved = agreements.filter(a => a.status === 'approved' || a.status === 'agreement_generated').length;
+  const rework = agreements.filter(a => a.status === 'needs_revision').length;
 
   const filtered = filterStatus === 'All'
     ? agreements
-    : agreements.filter(a => a.status === filterStatus);
+    : agreements.filter(a => a.status.toLowerCase() === filterStatus.toLowerCase());
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center h-64">
+        <Loader2 className="w-8 h-8 animate-spin text-blue-600" />
+      </div>
+    );
+  }
 
   return (
     <div>
@@ -52,7 +81,7 @@ const Agreements: React.FC = () => {
       {showFilter && (
         <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-4 mb-4 flex flex-wrap items-center gap-3">
           <span className="text-sm text-gray-500 font-medium">Status:</span>
-          {['All', 'Under Review', 'Approved', 'Rework'].map(s => (
+          {['All', 'under_review', 'approved', 'agreement_generated', 'needs_revision'].map(s => (
             <button
               key={s}
               onClick={() => setFilterStatus(s)}
@@ -62,7 +91,7 @@ const Agreements: React.FC = () => {
                   : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
               }`}
             >
-              {s}
+              {s === 'All' ? 'All' : s.replace('_', ' ').replace(/\b\w/g, l => l.toUpperCase())}
             </button>
           ))}
           <button
@@ -109,15 +138,21 @@ const Agreements: React.FC = () => {
             <tbody className="divide-y divide-gray-50">
               {filtered.map((a) => (
                 <tr key={a.id} className="hover:bg-gray-50 transition-colors">
-                  <td className="px-5 py-4 text-sm font-semibold text-blue-600">{a.id}</td>
-                  <td className="px-5 py-4 text-sm font-medium text-gray-900">{a.customerName}</td>
-                  <td className="px-5 py-4 text-sm text-gray-700">{a.project}</td>
-                  <td className="px-5 py-4 text-sm text-gray-700 whitespace-nowrap">{a.unit}</td>
+                  <td className="px-5 py-4 text-sm font-semibold text-blue-600">{a.id.slice(0, 8)}</td>
+                  <td className="px-5 py-4 text-sm font-medium text-gray-900">
+                    {a.allottee ? `${a.allottee.first_name} ${a.allottee.last_name}` : 'N/A'}
+                  </td>
+                  <td className="px-5 py-4 text-sm text-gray-700">{a.project?.name || 'N/A'}</td>
+                  <td className="px-5 py-4 text-sm text-gray-700 whitespace-nowrap">
+                    {a.unit ? `${a.unit.tower}-${a.unit.unit_no}` : 'N/A'}
+                  </td>
                   <td className="px-5 py-4">
                     <Badge status={a.status} />
                   </td>
-                  <td className="px-5 py-4 text-sm text-gray-700">{a.createdBy}</td>
-                  <td className="px-5 py-4 text-sm text-gray-700 whitespace-nowrap">{a.createdDate}</td>
+                  <td className="px-5 py-4 text-sm text-gray-700">{a.agent_name || 'System'}</td>
+                  <td className="px-5 py-4 text-sm text-gray-700 whitespace-nowrap">
+                    {new Date(a.created_at).toLocaleDateString()}
+                  </td>
                   <td className="px-5 py-4">
                     <div className="flex items-center gap-2">
                       <button
@@ -134,7 +169,7 @@ const Agreements: React.FC = () => {
                       >
                         <Printer size={16} />
                       </button>
-                      {a.status === 'Under Review' && (
+                      {a.status === 'under_review' && (
                         <>
                           <button
                             onClick={() => updateStatus(a.id, 'Approved')}
@@ -156,6 +191,13 @@ const Agreements: React.FC = () => {
                   </td>
                 </tr>
               ))}
+              {filtered.length === 0 && (
+                <tr>
+                  <td colSpan={8} className="px-5 py-12 text-center text-sm text-gray-400">
+                    No agreements found
+                  </td>
+                </tr>
+              )}
             </tbody>
           </table>
         </div>
@@ -166,12 +208,12 @@ const Agreements: React.FC = () => {
         <Modal title="Agreement Details" onClose={() => setViewAgreement(null)} size="sm">
           <div className="space-y-0">
             {[
-              ['Agreement ID', viewAgreement.id],
-              ['Customer', viewAgreement.customerName],
-              ['Project', viewAgreement.project],
-              ['Unit', viewAgreement.unit],
-              ['Created By', viewAgreement.createdBy],
-              ['Created Date', viewAgreement.createdDate],
+              ['Agreement ID', viewAgreement.id.slice(0, 8)],
+              ['Customer', viewAgreement.allottee ? `${viewAgreement.allottee.first_name} ${viewAgreement.allottee.last_name}` : 'N/A'],
+              ['Project', viewAgreement.project?.name || 'N/A'],
+              ['Unit', viewAgreement.unit ? `${viewAgreement.unit.tower}-${viewAgreement.unit.unit_no}` : 'N/A'],
+              ['Created By', viewAgreement.agent_name || 'System'],
+              ['Created Date', new Date(viewAgreement.created_at).toLocaleDateString()],
             ].map(([k, v]) => (
               <div key={k} className="flex justify-between items-center py-2.5 border-b border-gray-50 last:border-0">
                 <span className="text-sm text-gray-500">{k}</span>
@@ -185,7 +227,7 @@ const Agreements: React.FC = () => {
           </div>
 
           {/* Action buttons in modal */}
-          {viewAgreement.status === 'Under Review' && (
+          {viewAgreement.status === 'under_review' && (
             <div className="flex gap-3 mt-5">
               <button
                 onClick={() => updateStatus(viewAgreement.id, 'Approved')}
