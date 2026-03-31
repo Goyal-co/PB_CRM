@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Building2, MapPin, Loader2, Plus, Edit2, Trash2, Home, Grid3x3 } from 'lucide-react';
+import { Building2, MapPin, Loader2, Plus, Edit2, Trash2, Home } from 'lucide-react';
 import { projectService, type Project } from '../services/projectService';
 import { unitService, type Unit, type Tower, type UnitType } from '../services/unitService';
 import Modal from '../components/ui/Modal';
@@ -22,7 +22,6 @@ const Projects: React.FC = () => {
   const [showUnitsModal, setShowUnitsModal] = useState(false);
   const [showAddUnitModal, setShowAddUnitModal] = useState(false);
   const [showEditUnitModal, setShowEditUnitModal] = useState(false);
-  const [showDeleteUnitConfirm, setShowDeleteUnitConfirm] = useState(false);
   const [selectedUnit, setSelectedUnit] = useState<Unit | null>(null);
   const [unitFormData, setUnitFormData] = useState({
     unit_no: '',
