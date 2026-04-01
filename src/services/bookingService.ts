@@ -134,4 +134,8 @@ export const bookingService = {
   async getMergedAgreement(id: string) {
     return apiService.get<{ merged_html: string; header_html?: string; footer_html?: string }>(`/bookings/${id}/merged-agreement`);
   },
+
+  async getForm(id: string) {
+    return apiService.get<Record<string, unknown>>(`/bookings/${id}/form`);
+  },
 };

@@ -7,5 +7,12 @@ export default defineConfig({
   plugins: [react(), tailwindcss()],
   server: {
     port: 3000,
+    proxy: {
+      '/api': {
+        target: 'https://pbcrmbackend-production.up.railway.app',
+        changeOrigin: true,
+        secure: true,
+      },
+    },
   },
 })

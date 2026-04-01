@@ -6,6 +6,29 @@ import Toast from '../components/ui/Toast';
 import { bookingService, type Booking } from '../services/bookingService';
 import { documentService, type Document } from '../services/documentService';
 
+// Map flat API response fields to the nested Booking shape used by UI
+const mapBooking = (b: Booking): Booking => {
+  const raw = b as unknown as Record<string, unknown>;
+  return {
+    ...b,
+    allottee: b.allottee || (raw.allottee_name ? {
+      first_name: (raw.allottee_name as string).split(' ').slice(0, -1).join(' ') || (raw.allottee_name as string),
+      last_name: (raw.allottee_name as string).split(' ').slice(-1)[0] || '',
+      email: (raw.allottee_email as string) || b.allottee_email || '',
+      phone: (raw.allottee_phone as string) || b.allottee_phone,
+    } : undefined),
+    allottee_phone: b.allottee_phone || (raw.allottee_phone as string) || undefined,
+    project: b.project || (raw.project_name ? { name: raw.project_name as string } : undefined),
+    unit: b.unit || (raw.unit_no ? {
+      unit_no: raw.unit_no as string,
+      tower: (raw.tower as string) || '',
+      unit_type: (raw.unit_type as string) || '',
+      carpet_area_sqft: (raw.carpet_area_sqft as number) || 0,
+    } : undefined),
+    agent_name: b.agent_name || (raw.manager_name as string) || undefined,
+  } as Booking;
+};
+
 const NewBookings: React.FC = () => {
   const [bookings, setBookings] = useState<Booking[]>([]);
   const [loading, setLoading] = useState(true);
@@ -15,12 +38,23 @@ const NewBookings: React.FC = () => {
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
   const [bookingDocuments, setBookingDocuments] = useState<Document[]>([]);
   const [loadingDocuments, setLoadingDocuments] = useState(false);
+  const [actionLoading, setActionLoading] = useState<string | null>(null);
 
   const fetchBookings = async () => {
     try {
       setLoading(true);
-      const data = await bookingService.getPendingReview();
-      setBookings(data);
+      // Fetch both submitted and under_review bookings so they stay visible
+      const [submittedRes, underReviewRes] = await Promise.all([
+        bookingService.getAll({ status: 'submitted' }).catch(() => []),
+        bookingService.getAll({ status: 'under_review' }).catch(() => []),
+      ]);
+      // Handle both array and paginated { data: [], meta: {} } response shapes
+      const toArray = (res: unknown): Booking[] => Array.isArray(res) ? res : ((res as { data?: Booking[] })?.data || []);
+      const all = [...toArray(submittedRes), ...toArray(underReviewRes)].map(mapBooking);
+      // Deduplicate by id
+      const seen = new Set<string>();
+      const unique = all.filter(b => { if (seen.has(b.id)) return false; seen.add(b.id); return true; });
+      setBookings(unique);
     } catch (error) {
       console.error('Failed to fetch bookings:', error);
       setToast({ message: 'Failed to load bookings', type: 'error' });
@@ -35,14 +69,16 @@ const NewBookings: React.FC = () => {
 
   const takeOwnership = async (id: string) => {
     try {
+      setActionLoading(id);
       await bookingService.startReview(id);
-      setBookings(prev =>
-        prev.map(b => b.id === id ? { ...b, status: 'under_review' } : b)
-      );
       setToast({ message: 'Review started. Booking is now under review.', type: 'success' });
-    } catch (error) {
+      // Re-fetch to get updated data with correct status
+      await fetchBookings();
+    } catch (error: any) {
       console.error('Failed to start review:', error);
-      setToast({ message: 'Failed to start review', type: 'error' });
+      setToast({ message: error?.message || 'Failed to start review', type: 'error' });
+    } finally {
+      setActionLoading(null);
     }
   };
 
@@ -142,8 +178,10 @@ const NewBookings: React.FC = () => {
                     {b.status === 'submitted' ? (
                       <button
                         onClick={() => takeOwnership(b.id)}
-                        className="px-3 md:px-4 py-1.5 bg-blue-600 text-white text-xs font-medium rounded-lg hover:bg-blue-700 transition-colors whitespace-nowrap"
+                        disabled={actionLoading === b.id}
+                        className="px-3 md:px-4 py-1.5 bg-blue-600 text-white text-xs font-medium rounded-lg hover:bg-blue-700 transition-colors whitespace-nowrap disabled:opacity-50 flex items-center gap-1.5"
                       >
+                        {actionLoading === b.id && <Loader2 size={12} className="animate-spin" />}
                         Take Ownership
                       </button>
                     ) : (

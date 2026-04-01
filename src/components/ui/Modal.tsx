@@ -5,7 +5,7 @@ interface ModalProps {
   title: string;
   onClose: () => void;
   children: React.ReactNode;
-  size?: 'sm' | 'md' | 'lg';
+  size?: 'sm' | 'md' | 'lg' | 'xl';
 }
 
 const Modal: React.FC<ModalProps> = ({ title, onClose, children, size = 'md' }) => {
@@ -15,7 +15,7 @@ const Modal: React.FC<ModalProps> = ({ title, onClose, children, size = 'md' }) 
     return () => document.removeEventListener('keydown', onKey);
   }, [onClose]);
 
-  const maxW = { sm: 'max-w-sm', md: 'max-w-lg', lg: 'max-w-2xl' }[size];
+  const maxW = { sm: 'max-w-sm', md: 'max-w-lg', lg: 'max-w-2xl', xl: 'max-w-4xl' }[size];
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50">
