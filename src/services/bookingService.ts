@@ -135,6 +135,22 @@ export const bookingService = {
     return apiService.get<{ merged_html: string; header_html?: string; footer_html?: string }>(`/bookings/${id}/merged-agreement`);
   },
 
+  async getAgreementDownloadUrl(id: string, opts?: { async?: boolean }) {
+    return apiService.get<{ cached: boolean; url: string | null; expires_at: string | null }>(
+      `/bookings/${id}/agreement-download-url`,
+      opts?.async ? { async: true } : undefined,
+    );
+  },
+
+  async getAgreementHtml(id: string) {
+    return apiService.getText(`/bookings/${id}/agreement-download`, { format: 'html' });
+  },
+
+  async downloadAgreementPdf(id: string) {
+    // Fallback when signed URL endpoint isn't available: download from API with Authorization.
+    return apiService.getBlob(`/bookings/${id}/agreement-download`);
+  },
+
   async getForm(id: string) {
     return apiService.get<Record<string, unknown>>(`/bookings/${id}/form`);
   },

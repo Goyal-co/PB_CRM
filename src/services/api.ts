@@ -22,26 +22,49 @@ class ApiService {
     return this.token || localStorage.getItem('access_token');
   }
 
+  private async refreshIfPossible(): Promise<boolean> {
+    const refreshToken = localStorage.getItem('refresh_token');
+    if (!refreshToken) return false;
+    const refreshUrl = `${this.baseURL}/auth/refresh`;
+    const refreshRes = await fetch(refreshUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ refresh_token: refreshToken }),
+    });
+    const refreshData = await refreshRes.json().catch(() => null);
+    if (refreshRes.ok && refreshData?.success && refreshData.data) {
+      const sessionData = refreshData.data;
+      this.setToken(sessionData.access_token);
+      localStorage.setItem('refresh_token', sessionData.refresh_token);
+      if (sessionData.profile) {
+        localStorage.setItem('user_profile', JSON.stringify(sessionData.profile));
+      }
+      return true;
+    }
+    return false;
+  }
+
+  private buildHeaders(options: RequestInit): Record<string, string> {
+    const token = this.getToken();
+    const headers: Record<string, string> = {
+      ...(options.headers as Record<string, string>),
+    };
+    if (options.body) {
+      headers['Content-Type'] = 'application/json';
+    }
+    if (token) {
+      headers['Authorization'] = `Bearer ${token}`;
+    }
+    return headers;
+  }
+
   private async request<T>(
     endpoint: string,
     options: RequestInit = {},
     isRetry = false
   ): Promise<T> {
     const url = `${this.baseURL}${endpoint}`;
-    const token = this.getToken();
-
-    const headers: Record<string, string> = {
-      ...(options.headers as Record<string, string>),
-    };
-
-    // Only set Content-Type if there's a body
-    if (options.body) {
-      headers['Content-Type'] = 'application/json';
-    }
-
-    if (token) {
-      headers['Authorization'] = `Bearer ${token}`;
-    }
+    const headers = this.buildHeaders(options);
 
     try {
       const response = await fetch(url, {
@@ -54,51 +77,18 @@ class ApiService {
       // Handle 401 Unauthorized - try to refresh token
       if (response.status === 401 && !isRetry && endpoint !== '/auth/login' && endpoint !== '/auth/refresh') {
         console.log('Token expired, attempting refresh...');
-        const refreshToken = localStorage.getItem('refresh_token');
-        
-        if (refreshToken) {
-          try {
-            // Make direct fetch call to refresh endpoint to avoid recursion
-            const refreshUrl = `${this.baseURL}/auth/refresh`;
-            const refreshRes = await fetch(refreshUrl, {
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/json',
-              },
-              body: JSON.stringify({ refresh_token: refreshToken }),
-            });
-            
-            const refreshData = await refreshRes.json();
-            
-            if (refreshRes.ok && refreshData.success && refreshData.data) {
-              const sessionData = refreshData.data;
-              
-              // Update tokens
-              this.setToken(sessionData.access_token);
-              localStorage.setItem('refresh_token', sessionData.refresh_token);
-              if (sessionData.profile) {
-                localStorage.setItem('user_profile', JSON.stringify(sessionData.profile));
-              }
-              
-              console.log('Token refreshed successfully');
-              
-              // Retry the original request with new token
-              return this.request<T>(endpoint, options, true);
-            } else {
-              throw new Error('Token refresh failed');
-            }
-          } catch (refreshError) {
-            console.error('Token refresh failed:', refreshError);
-            // Clear tokens and redirect to login
-            this.setToken(null);
-            localStorage.removeItem('refresh_token');
-            localStorage.removeItem('user_profile');
-            window.location.href = '/login';
-            throw new Error('Session expired. Please login again.');
+        try {
+          const ok = await this.refreshIfPossible();
+          if (ok) {
+            console.log('Token refreshed successfully');
+            return this.request<T>(endpoint, options, true);
           }
-        } else {
-          // No refresh token, redirect to login
+          throw new Error('Token refresh failed');
+        } catch (refreshError) {
+          console.error('Token refresh failed:', refreshError);
           this.setToken(null);
+          localStorage.removeItem('refresh_token');
+          localStorage.removeItem('user_profile');
           window.location.href = '/login';
           throw new Error('Session expired. Please login again.');
         }
@@ -117,6 +107,68 @@ class ApiService {
       }
       throw new Error('An unexpected error occurred');
     }
+  }
+
+  async getText(endpoint: string, params?: Record<string, string | number | boolean>): Promise<string> {
+    const queryString = params
+      ? '?' + new URLSearchParams(
+          Object.entries(params).reduce((acc, [key, value]) => {
+            acc[key] = String(value);
+            return acc;
+          }, {} as Record<string, string>)
+        ).toString()
+      : '';
+    const url = `${this.baseURL}${endpoint}${queryString}`;
+    const doFetch = async (isRetry: boolean) => {
+      const response = await fetch(url, { method: 'GET', headers: this.buildHeaders({}) });
+      if (response.status === 401 && !isRetry && endpoint !== '/auth/login' && endpoint !== '/auth/refresh') {
+        const ok = await this.refreshIfPossible();
+        if (ok) return doFetch(true);
+      }
+      if (!response.ok) {
+        // best effort: parse standard API error envelope
+        const maybeJson = await response.json().catch(() => null);
+        const message =
+          maybeJson?.error?.message ||
+          `Request failed with status ${response.status}`;
+        throw new Error(message);
+      }
+      return response.text();
+    };
+    return doFetch(false);
+  }
+
+  async getBlob(
+    endpoint: string,
+    params?: Record<string, string | number | boolean>,
+  ): Promise<{ blob: Blob; contentType: string; status: number }> {
+    const queryString = params
+      ? '?' + new URLSearchParams(
+          Object.entries(params).reduce((acc, [key, value]) => {
+            acc[key] = String(value);
+            return acc;
+          }, {} as Record<string, string>)
+        ).toString()
+      : '';
+    const url = `${this.baseURL}${endpoint}${queryString}`;
+    const doFetch = async (isRetry: boolean) => {
+      const response = await fetch(url, { method: 'GET', headers: this.buildHeaders({}) });
+      if (response.status === 401 && !isRetry && endpoint !== '/auth/login' && endpoint !== '/auth/refresh') {
+        const ok = await this.refreshIfPossible();
+        if (ok) return doFetch(true);
+      }
+      const contentType = response.headers.get('content-type') || '';
+      if (!response.ok) {
+        const maybeJson = await response.json().catch(() => null);
+        const message =
+          maybeJson?.error?.message ||
+          `Request failed with status ${response.status}`;
+        throw Object.assign(new Error(message), { status: response.status, contentType });
+      }
+      const blob = await response.blob();
+      return { blob, contentType, status: response.status };
+    };
+    return doFetch(false);
   }
 
   async get<T>(endpoint: string, params?: Record<string, string | number | boolean>): Promise<T> {

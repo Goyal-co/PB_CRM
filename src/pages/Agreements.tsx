@@ -7,7 +7,7 @@ import Toast from '../components/ui/Toast';
 import { bookingService, type Booking } from '../services/bookingService';
 import { agreementTemplateService, type MergedAgreement } from '../services/agreementTemplateService';
 import { fieldValueService } from '../services/fieldValueService';
-import html2pdf from 'html2pdf.js';
+// NOTE: We avoid client-side PDF generation (html2pdf.js) for performance.
 
 // Renders agreement HTML inside an iframe to fully isolate styles from the main page
 const AgreementPreviewFrame: React.FC<{ html: string }> = ({ html }) => {
@@ -128,49 +128,62 @@ const Agreements: React.FC = () => {
     return resolved;
   };
 
+  const pollAgreementUrl = async (bookingId: string, timeoutMs = 25_000) => {
+    const started = Date.now();
+    while (Date.now() - started < timeoutMs) {
+      const res = await bookingService.getAgreementDownloadUrl(bookingId);
+      if (res.cached && res.url) return res.url;
+      await new Promise(r => setTimeout(r, 1200));
+    }
+    return null;
+  };
+
   const handleDownloadAgreement = async (booking: Booking) => {
     try {
       setPrintingId(booking.id);
-      const merged = await fetchMergedOrFallback(booking);
-
-      // Build value map once, then apply to all HTML parts
-      let resolvedHtml = merged.merged_html;
-      let resolvedHeader = merged.header_html || '';
-      let resolvedFooter = merged.footer_html || '';
+      // Fast path: if a cached PDF exists in Supabase Storage, download is instant.
       try {
-        const valueMap = await buildValueMap(booking);
-        resolvedHtml = applyPlaceholders(merged.merged_html, valueMap);
-        if (merged.header_html) resolvedHeader = applyPlaceholders(merged.header_html, valueMap);
-        if (merged.footer_html) resolvedFooter = applyPlaceholders(merged.footer_html, valueMap);
-      } catch (e) {
-        console.warn('Placeholder resolution failed, using raw merged HTML:', e);
+        const first = await bookingService.getAgreementDownloadUrl(booking.id, { async: true });
+        if (first.cached && first.url) {
+          window.location.assign(first.url);
+          setToast({ message: 'Downloading agreement PDF...', type: 'success' });
+          return;
+        }
+
+        // Not cached: backend is generating in background. Poll briefly, otherwise tell user to retry.
+        const url = await pollAgreementUrl(booking.id);
+        if (url) {
+          window.location.assign(url);
+          setToast({ message: 'Downloading agreement PDF...', type: 'success' });
+          return;
+        }
+
+        setToast({
+          message: 'Agreement PDF is being generated. Please try again in a few seconds.',
+          type: 'success',
+        });
+        return;
+      } catch (e: any) {
+        // If the production backend hasn't deployed agreement-download-url yet, fall back to direct API PDF download.
+        const msg = e?.message ? String(e.message) : '';
+        if (msg.includes('Cannot GET') && msg.includes('agreement-download-url')) {
+          const res = await bookingService.downloadAgreementPdf(booking.id);
+          if (!res.contentType.toLowerCase().includes('application/pdf')) {
+            throw new Error('Server did not return a PDF');
+          }
+          const url = URL.createObjectURL(res.blob);
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = `agreement-${booking.id}.pdf`;
+          document.body.appendChild(a);
+          a.click();
+          a.remove();
+          setTimeout(() => URL.revokeObjectURL(url), 10_000);
+          setToast({ message: 'Downloading agreement PDF...', type: 'success' });
+          return;
+        }
+        throw e;
       }
-
-      const { margins, page_size } = merged;
-      const customerName = booking.allottee
-        ? `${booking.allottee.first_name}_${booking.allottee.last_name}`
-        : booking.id.slice(0, 8);
-      const fileName = `Agreement_${customerName}.pdf`;
-
-      const container = document.createElement('div');
-      container.style.fontFamily = "'Times New Roman', serif";
-      container.style.padding = '0';
-      container.innerHTML = `
-        ${resolvedHeader}
-        ${resolvedHtml}
-        ${resolvedFooter}
-      `;
-
-      const opt = {
-        margin: [margins?.top ?? 20, margins?.right ?? 15, margins?.bottom ?? 20, margins?.left ?? 15] as [number, number, number, number],
-        filename: fileName,
-        image: { type: 'jpeg' as const, quality: 0.98 },
-        html2canvas: { scale: 2, useCORS: true },
-        jsPDF: { unit: 'mm' as const, format: (page_size || 'a4').toLowerCase(), orientation: 'portrait' as const },
-      };
-
-      await html2pdf().set(opt).from(container).save();
-      setToast({ message: 'Agreement downloaded successfully', type: 'success' });
     } catch (error) {
       console.error('Failed to download agreement:', error);
       setToast({ message: 'Failed to download agreement', type: 'error' });
@@ -241,24 +254,18 @@ const Agreements: React.FC = () => {
     setPreviewAgreement({ booking, merged: null, loading: true });
 
     try {
-      const merged = await fetchMergedOrFallback(booking);
-
-      // Build value map once, then apply to all HTML parts
-      let resolvedHtml = merged.merged_html;
-      let resolvedHeader = merged.header_html;
-      let resolvedFooter = merged.footer_html;
-      try {
-        const valueMap = await buildValueMap(booking);
-        resolvedHtml = applyPlaceholders(merged.merged_html, valueMap);
-        if (merged.header_html) resolvedHeader = applyPlaceholders(merged.header_html, valueMap);
-        if (merged.footer_html) resolvedFooter = applyPlaceholders(merged.footer_html, valueMap);
-      } catch (e) {
-        console.warn('Placeholder resolution failed, showing raw HTML:', e);
-      }
-
-      const resolved = { ...merged, merged_html: resolvedHtml, header_html: resolvedHeader, footer_html: resolvedFooter };
-      mergedCache.current[booking.id] = resolved;
-      setPreviewAgreement({ booking, merged: resolved, loading: false });
+      // Fast preview path: get already-merged full HTML from backend.
+      // (Avoids fetching field values + doing placeholder merges in the browser.)
+      const html = await bookingService.getAgreementHtml(booking.id);
+      const merged: MergedAgreement = {
+        merged_html: html,
+        header_html: '',
+        footer_html: '',
+        page_size: 'A4',
+        margins: { top: 20, right: 15, bottom: 20, left: 15 },
+      };
+      mergedCache.current[booking.id] = merged;
+      setPreviewAgreement({ booking, merged, loading: false });
     } catch (error) {
       console.error('Failed to load agreement preview:', error);
       setPreviewAgreement(null);
