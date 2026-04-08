@@ -1,5 +1,7 @@
 export const API_CONFIG = {
-  BASE_URL: import.meta.env.VITE_API_BASE_URL || 'https://pbcrmbackend-production.up.railway.app/api/v1',
+  // Prefer a relative base URL so hosting (Vercel) can proxy /api/v1 → backend and avoid CORS.
+  // You can still override with VITE_API_BASE_URL for direct calls.
+  BASE_URL: import.meta.env.VITE_API_BASE_URL || '/api/v1',
   TIMEOUT: 30000,
 };
 
