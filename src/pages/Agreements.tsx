@@ -5,8 +5,7 @@ import { Badge } from '../components/ui/Badge';
 import Modal from '../components/ui/Modal';
 import Toast from '../components/ui/Toast';
 import { bookingService, type Booking } from '../services/bookingService';
-import { agreementTemplateService, type MergedAgreement } from '../services/agreementTemplateService';
-import { fieldValueService } from '../services/fieldValueService';
+import { type MergedAgreement } from '../services/agreementTemplateService';
 // NOTE: We avoid client-side PDF generation (html2pdf.js) for performance.
 
 // Renders agreement HTML inside an iframe to fully isolate styles from the main page
@@ -47,86 +46,6 @@ const Agreements: React.FC = () => {
   const [previewAgreement, setPreviewAgreement] = useState<{ booking: Booking; merged: MergedAgreement | null; loading: boolean } | null>(null);
   const [previewLoadingId, setPreviewLoadingId] = useState<string | null>(null);
   const mergedCache = React.useRef<Record<string, MergedAgreement>>({});
-
-  const buildValueMap = async (booking: Booking): Promise<Record<string, string>> => {
-    // Fetch full booking detail and field values in one parallel call
-    const [fullBookingRes, fieldValues] = await Promise.all([
-      bookingService.getById(booking.id).catch(() => null),
-      fieldValueService.getByBooking(booking.id).catch(() => null),
-    ]);
-
-    const fb = fullBookingRes || booking;
-    const raw = fb as unknown as Record<string, unknown>;
-
-    const now = new Date();
-    const createdAt = new Date((raw.application_date as string) || fb.created_at);
-
-    const valueMap: Record<string, string> = {
-      agreement_day: createdAt.getDate().toString(),
-      agreement_month: createdAt.toLocaleString('en-IN', { month: 'long' }),
-      agreement_year: createdAt.getFullYear().toString(),
-      agreement_date: createdAt.toLocaleDateString('en-IN', { day: '2-digit', month: '2-digit', year: 'numeric' }),
-      current_date: now.toLocaleDateString('en-IN', { day: '2-digit', month: '2-digit', year: 'numeric' }),
-      current_day: now.getDate().toString(),
-      current_month: now.toLocaleString('en-IN', { month: 'long' }),
-      current_year: now.getFullYear().toString(),
-      booking_id: fb.id,
-      booking_status: fb.status,
-      application_no: (raw.application_no as string) || '',
-      allottee_name: (raw.allottee_name as string) || (fb.allottee ? `${fb.allottee.first_name} ${fb.allottee.last_name}` : ''),
-      allottee_first_name: fb.allottee?.first_name || ((raw.allottee_name as string) || '').split(' ').slice(0, -1).join(' '),
-      allottee_last_name: fb.allottee?.last_name || ((raw.allottee_name as string) || '').split(' ').slice(-1)[0] || '',
-      allottee_email: fb.allottee_email || fb.allottee?.email || '',
-      allottee_phone: (raw.allottee_phone as string) || fb.allottee_phone || fb.allottee?.phone || '',
-      allottee_address: fb.allottee_address || '',
-      aadhar_no: (raw.aadhar_no as string) || '',
-      project_name: (raw.project_name as string) || fb.project?.name || '',
-      unit_no: (raw.unit_no as string) || fb.unit?.unit_no || '',
-      tower: (raw.tower as string) || fb.unit?.tower || '',
-      floor_no: (raw.floor_no as number)?.toString() || '',
-      unit_type: (raw.unit_type as string) || fb.unit?.unit_type || '',
-      carpet_area_sqft: ((raw.carpet_area_sqft as number) || fb.unit?.carpet_area_sqft)?.toString() || '',
-      super_built_up_sqft: (raw.super_built_up_sqft as number)?.toString() || '',
-      basic_sale_value: (raw.basic_sale_value as number)?.toString() || '',
-      gross_apartment_value: (raw.gross_apartment_value as number)?.toString() || '',
-      manager_name: (raw.manager_name as string) || '',
-      agent_name: fb.agent_name || (raw.manager_name as string) || '',
-      agent_rera_no: fb.agent_rera_no || '',
-      agent_contact_no: fb.agent_contact_no || '',
-      agent_email: fb.agent_email || '',
-      fund_source: fb.fund_source || '',
-      home_loan_pct: fb.home_loan_pct?.toString() || '',
-      booking_amount: (raw.booking_amount as number)?.toString() || '',
-      total_collected: (raw.total_collected as number)?.toString() || '',
-      total_due: (raw.total_due as number)?.toString() || '',
-    };
-
-    if (fieldValues) {
-      for (const [fieldKey, fv] of Object.entries(fieldValues)) {
-        const val = fv.value_text
-          ?? fv.value_number?.toString()
-          ?? (fv.value_date ? new Date(fv.value_date).toLocaleDateString('en-IN') : null)
-          ?? (fv.value_boolean !== undefined && fv.value_boolean !== null ? (fv.value_boolean ? 'Yes' : 'No') : null)
-          ?? '';
-        valueMap[fieldKey] = val;
-      }
-    }
-
-    for (const [key, value] of Object.entries(raw)) {
-      if (value !== null && value !== undefined && !valueMap[key]) {
-        valueMap[key] = typeof value === 'object' ? JSON.stringify(value) : String(value);
-      }
-    }
-
-    return valueMap;
-  };
-
-  const applyPlaceholders = (html: string, valueMap: Record<string, string>): string => {
-    let resolved = html;
-    resolved = resolved.replace(/\{\{(\w+)\}\}/g, (_match, key) => valueMap[key] ?? '');
-    resolved = resolved.replace(/\{(\w+)\}/g, (_match, key) => valueMap[key] ?? '');
-    return resolved;
-  };
 
   const pollAgreementUrl = async (bookingId: string, timeoutMs = 25_000) => {
     const started = Date.now();
@@ -190,55 +109,6 @@ const Agreements: React.FC = () => {
     } finally {
       setPrintingId(null);
     }
-  };
-
-  const fetchMergedOrFallback = async (booking: Booking): Promise<MergedAgreement> => {
-    // Fetch merged-agreement and full booking detail in parallel
-    const [mergedResult, bookingDetail] = await Promise.allSettled([
-      agreementTemplateService.getMergedAgreement(booking.id),
-      bookingService.getById(booking.id),
-    ]);
-
-    // If merged-agreement returned HTML, use it directly
-    if (mergedResult.status === 'fulfilled' && mergedResult.value.merged_html) {
-      return mergedResult.value;
-    }
-
-    // Use full booking to get agreement_template_id
-    const fullBooking = (bookingDetail.status === 'fulfilled' ? bookingDetail.value : booking) as unknown as Record<string, unknown>;
-    const agreementTemplateId = fullBooking.agreement_template_id as string;
-
-    if (agreementTemplateId) {
-      const template = await agreementTemplateService.getById(agreementTemplateId);
-      if (template.body_html) {
-        return {
-          merged_html: template.body_html,
-          header_html: template.header_html,
-          footer_html: template.footer_html,
-          page_size: template.page_size || 'A4',
-          margins: { top: template.margin_top, bottom: template.margin_bottom, left: template.margin_left, right: template.margin_right },
-        };
-      }
-    }
-
-    // Fallback: fetch active templates for this project
-    const projectId = (fullBooking.project_id as string) || booking.project_id;
-    const templatesRes = await agreementTemplateService.getAll({ project_id: projectId, is_active: true });
-    const templateList = Array.isArray(templatesRes) ? templatesRes : (templatesRes as unknown as { data: typeof templatesRes }).data || [];
-    if (templateList.length > 0) {
-      const template = await agreementTemplateService.getById(templateList[0].id);
-      if (template.body_html) {
-        return {
-          merged_html: template.body_html,
-          header_html: template.header_html,
-          footer_html: template.footer_html,
-          page_size: template.page_size || 'A4',
-          margins: { top: template.margin_top, bottom: template.margin_bottom, left: template.margin_left, right: template.margin_right },
-        };
-      }
-    }
-
-    throw new Error('No agreement template found for this booking');
   };
 
   const handlePreviewAgreement = async (booking: Booking) => {
