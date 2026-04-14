@@ -8,7 +8,6 @@ export type DocType =
   | 'voter_id'
   | 'bank_statement'
   | 'salary_slip'
-  | 'booking_form_scan'
   | 'agreement_copy'
   | 'payment_receipt'
   | 'other';
@@ -59,7 +58,8 @@ export const documentService = {
 
   async upload(params: UploadDocumentParams) {
     const formData = new FormData();
-    formData.append('file', params.file);
+    // Include filename explicitly (some backends rely on it)
+    formData.append('file', params.file, params.file.name);
     formData.append('booking_id', params.booking_id);
     formData.append('type', params.type);
     

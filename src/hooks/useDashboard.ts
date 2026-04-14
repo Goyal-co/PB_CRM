@@ -4,6 +4,9 @@ import { bookingService, type Booking } from '../services/bookingService';
 import { paymentService, type Payment } from '../services/paymentService';
 import { useAuth } from '../context/AuthContext';
 
+const toBookingArray = (res: unknown): Booking[] =>
+  Array.isArray(res) ? res : ((res as { data?: Booking[] })?.data ?? []);
+
 export const useDashboard = () => {
   const { currentUser } = useAuth();
   const [kpis, setKpis] = useState<DashboardKPIs | null>(null);
@@ -39,11 +42,15 @@ export const useDashboard = () => {
           }
 
           try {
-            const bookingsData = await bookingService.getWorkspace({ limit: 5 });
-            console.log('Recent bookings (workspace):', bookingsData);
-            console.log('Is array?', Array.isArray(bookingsData));
-            console.log('Length:', bookingsData?.length);
-            setRecentBookings(Array.isArray(bookingsData) ? bookingsData : []);
+            // Workspace = bookings in projects assigned to this manager token only.
+            // Super admins often have no workspace rows, so they would see an empty list
+            // even when users have submitted bookings. Use the global list for super_admin.
+            const bookingsData = isAdmin
+              ? await bookingService.getAll({ limit: 5 })
+              : await bookingService.getWorkspace({ limit: 5 });
+            const list = toBookingArray(bookingsData);
+            console.log('Recent bookings:', isAdmin ? '(getAll)' : '(workspace)', list);
+            setRecentBookings(list);
           } catch (bookingError) {
             console.error('Failed to fetch bookings:', bookingError);
             setRecentBookings([]);
@@ -72,10 +79,9 @@ export const useDashboard = () => {
 
           try {
             const bookingsData = await bookingService.getAll({ limit: 5 });
-            console.log('User bookings (getAll):', bookingsData);
-            console.log('Is array?', Array.isArray(bookingsData));
-            console.log('Length:', bookingsData?.length);
-            setRecentBookings(Array.isArray(bookingsData) ? bookingsData : []);
+            const list = toBookingArray(bookingsData);
+            console.log('User bookings (getAll):', list);
+            setRecentBookings(list);
           } catch (bookingError) {
             console.error('Failed to fetch user bookings:', bookingError);
             setRecentBookings([]);

@@ -101,6 +101,7 @@ const BookingForm: React.FC = () => {
   const [agreementTemplates, setAgreementTemplates] = useState<AgreementTemplate[]>([]);
   const [loading, setLoading] = useState(false);
   const formRef = useRef<HTMLFormElement>(null);
+  const pdfInputRef = useRef<HTMLInputElement>(null);
 
   const [formData, setFormData] = useState({
     projectId: '', unitId: '', formTemplateId: '', agreementTemplateId: '',
@@ -265,6 +266,25 @@ const BookingForm: React.FC = () => {
     }
   }, []);
 
+  const assignBookingPdf = useCallback((file: File | undefined | null, clearInput?: HTMLInputElement | null) => {
+    if (!file) return;
+    const looksPdf =
+      file.type === 'application/pdf' ||
+      (!file.type && file.name.toLowerCase().endsWith('.pdf')) ||
+      file.name.toLowerCase().endsWith('.pdf');
+    if (!looksPdf) {
+      setToast({ message: 'Please upload a PDF file only', type: 'error' });
+      if (clearInput) clearInput.value = '';
+      return;
+    }
+    if (file.size > 10 * 1024 * 1024) {
+      setToast({ message: 'File size must be less than 10MB', type: 'error' });
+      if (clearInput) clearInput.value = '';
+      return;
+    }
+    setUploadedPdf(file);
+  }, []);
+
   const handlePrint = async () => {
     // Check if we have a booking ID (only available after submission)
     const urlParams = new URLSearchParams(window.location.search);
@@ -344,6 +364,11 @@ const BookingForm: React.FC = () => {
       setToast({ message: 'Please accept terms and conditions', type: 'error' });
       return;
     }
+
+    if (!uploadedPdf) {
+      setToast({ message: 'Please upload the booking form PDF before submitting.', type: 'error' });
+      return;
+    }
     
     // Validate all required backend fields
     if (!formData.projectId || !formData.unitId || !formData.formTemplateId || !formData.agreementTemplateId) {
@@ -395,6 +420,20 @@ const BookingForm: React.FC = () => {
       // Create draft booking (does not block unit yet)
       const booking = await bookingService.create(bookingData);
       console.log('Booking created (draft):', booking);
+
+      // Normalize id/status across possible backend response shapes
+      const bookingRow = booking as unknown as Record<string, unknown>;
+      const bookingId = String((booking as any)?.id ?? bookingRow.booking_id ?? bookingRow.id ?? '').trim();
+      if (!bookingId) {
+        setToast({ message: 'Booking saved but no booking id was returned by server.', type: 'error' });
+        return;
+      }
+      const normStatus = (s: unknown) =>
+        String(s ?? '')
+          .toLowerCase()
+          .trim()
+          .replace(/\s+/g, '_');
+      const bookingStatusNorm = normStatus((booking as any)?.status ?? bookingRow.status);
       
       // Populate field values (required for field_snapshot)
       console.log('Fetching form template fields...');
@@ -458,9 +497,19 @@ const BookingForm: React.FC = () => {
         'declaration_place': formData.declarationPlace,
       };
       
+      const toCamel = (s: string) => s.replace(/_([a-z])/g, (_, c: string) => c.toUpperCase());
+      const getValueForFieldKey = (fieldKey: string) => {
+        if (Object.prototype.hasOwnProperty.call(formDataMap, fieldKey)) return formDataMap[fieldKey];
+        const camel = toCamel(fieldKey);
+        const anyForm = formData as unknown as Record<string, unknown>;
+        if (Object.prototype.hasOwnProperty.call(anyForm, fieldKey)) return anyForm[fieldKey];
+        if (Object.prototype.hasOwnProperty.call(anyForm, camel)) return anyForm[camel];
+        return undefined;
+      };
+
       // Map fields to values
       for (const field of fields) {
-        const value = formDataMap[field.field_key];
+        const value = getValueForFieldKey(field.field_key);
         if (value !== undefined && value !== null && value !== '') {
           const fieldValue: BulkFieldValueItem = {
             field_id: field.id,
@@ -490,10 +539,35 @@ const BookingForm: React.FC = () => {
       
       // Only upsert if we have field values
       if (fieldValues.length > 0) {
-        await fieldValueService.bulkUpsert(booking.id, fieldValues);
+        await fieldValueService.bulkUpsert(bookingId, fieldValues);
         console.log('Field values populated successfully');
       } else {
         console.warn('No form template fields configured. Skipping field value population.');
+      }
+
+      // Validate required fields exist in backend before submit (submit may stay in draft otherwise)
+      try {
+        const valuesByKey = await fieldValueService.getByBooking(bookingId);
+        const missingRequired = (fields || []).filter((f) =>
+          Boolean(f.is_active) &&
+          Boolean(f.visible_to_user) &&
+          Boolean(f.is_required) &&
+          !valuesByKey?.[f.field_key]
+        );
+        if (missingRequired.length > 0) {
+          const list = missingRequired
+            .slice(0, 6)
+            .map((f) => f.field_label || f.field_key)
+            .join(', ');
+          setToast({
+            message: `Please fill required fields before submitting: ${list}${missingRequired.length > 6 ? '…' : ''}`,
+            type: 'error',
+          });
+          return;
+        }
+      } catch (e) {
+        // If we can't validate, still try submit; backend will enforce rules.
+        console.warn('Required-field validation skipped:', e);
       }
       
       // Upload PDF document if provided
@@ -501,7 +575,8 @@ const BookingForm: React.FC = () => {
         try {
           console.log('Uploading PDF document...');
           await documentService.upload({
-            booking_id: booking.id,
+            booking_id: bookingId,
+            // Backend enum doesn't include booking_form_scan in production; use "other" + notes.
             type: 'other',
             file: uploadedPdf,
             allottee_index: 0,
@@ -510,22 +585,61 @@ const BookingForm: React.FC = () => {
           console.log('PDF uploaded successfully');
         } catch (uploadError: any) {
           console.error('Failed to upload PDF:', uploadError);
-          setToast({ message: 'Failed to upload PDF document. Please try again.', type: 'error' });
+          setToast({ message: uploadError?.message || 'Failed to upload PDF document. Please try again.', type: 'error' });
           return;
         }
       }
       
       // Submit for review (this will block the unit and create field_snapshot)
-      // Only submit if booking is in draft or needs_revision status
-      console.log('Booking status:', booking.status);
-      
-      if (booking.status === 'draft' || booking.status === 'needs_revision') {
+      // Only submit if booking is in draft or needs_revision status (normalize casing/spaces)
+      console.log('Booking status (normalized):', bookingStatusNorm);
+
+      if (bookingStatusNorm === 'draft' || bookingStatusNorm === 'needs_revision') {
         try {
-          await bookingService.submit(booking.id);
-          console.log('Booking submitted for review - unit blocked');
-          
-          setToast({ message: 'Booking submitted successfully!', type: 'success' });
-          
+          await bookingService.submit(bookingId);
+          console.log('Submit called; verifying status transition...');
+
+          const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+          // After submit, backend may transition to submitted immediately and to under_review slightly later
+          // (depending on server-side processing / manager assignment). Users cannot start review.
+          let refreshed = await bookingService.getById(bookingId).catch(() => null);
+          for (let i = 0; i < 40; i++) {
+            if (!refreshed) break;
+            if (normStatus((refreshed as any).status) !== 'draft') break;
+            await sleep(300);
+            refreshed = await bookingService.getById(bookingId).catch(() => refreshed);
+          }
+
+          // Wait a bit for under_review if the server moves it automatically
+          for (let i = 0; i < 40; i++) {
+            if (!refreshed) break;
+            const s = normStatus((refreshed as any).status);
+            if (s === 'under_review') break;
+            if (s !== 'submitted') break;
+            await sleep(300);
+            refreshed = await bookingService.getById(bookingId).catch(() => refreshed);
+          }
+
+          const finalStatus = normStatus((refreshed as any)?.status ?? bookingStatusNorm);
+          console.log('Booking status after submit:', finalStatus);
+
+          if (finalStatus === 'draft') {
+            setToast({
+              message: 'Submit was sent, but the server kept this booking in draft. Please check required fields / documents and try again.',
+              type: 'error',
+            });
+            return;
+          }
+
+          if (finalStatus === 'under_review') {
+            setToast({ message: 'Booking submitted successfully and is now under review.', type: 'success' });
+          } else if (finalStatus === 'submitted') {
+            setToast({ message: 'Booking submitted successfully. Waiting for manager to start review.', type: 'success' });
+          } else {
+            setToast({ message: `Booking submitted successfully! (Status: ${finalStatus})`, type: 'success' });
+          }
+
           // Redirect to My Bookings after 2 seconds
           setTimeout(() => {
             navigate('/my-bookings');
@@ -910,54 +1024,81 @@ const BookingForm: React.FC = () => {
             <InputField label="Place" name="declarationPlace" value={formData.declarationPlace} onChange={handleChange} required />
           </div>
           <div className="mt-4">
-            <label className="block text-xs font-semibold text-gray-700 mb-1.5 uppercase">
+            <p className="block text-xs font-semibold text-gray-700 mb-1.5 uppercase">
               Upload Booking Form PDF <span className="text-red-500">*</span>
-            </label>
-            <div className="border-2 border-dashed border-gray-300 rounded p-4 text-center">
+            </p>
+            <div
+              role="button"
+              tabIndex={0}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault();
+                  pdfInputRef.current?.click();
+                }
+              }}
+              onDragOver={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+              }}
+              onDrop={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                const file = e.dataTransfer.files?.[0];
+                assignBookingPdf(file ?? null);
+              }}
+              onClick={() => pdfInputRef.current?.click()}
+              className={`border-2 border-dashed rounded p-4 text-center cursor-pointer transition-colors ${
+                uploadedPdf ? 'border-green-400 bg-green-50/50' : 'border-gray-300 hover:border-slate-500 hover:bg-gray-50'
+              }`}
+            >
               <input
+                ref={pdfInputRef}
                 type="file"
                 accept=".pdf,application/pdf"
                 onChange={(e) => {
                   const file = e.target.files?.[0];
-                  if (file) {
-                    if (file.type !== 'application/pdf') {
-                      setToast({ message: 'Please upload a PDF file only', type: 'error' });
-                      e.target.value = '';
-                      return;
-                    }
-                    if (file.size > 10 * 1024 * 1024) {
-                      setToast({ message: 'File size must be less than 10MB', type: 'error' });
-                      e.target.value = '';
-                      return;
-                    }
-                    setUploadedPdf(file);
-                  }
+                  assignBookingPdf(file ?? null, e.target);
                 }}
-                required
-                className="hidden"
-                id="pdf-upload"
+                className="sr-only"
+                id="booking-form-pdf-upload"
+                tabIndex={-1}
+                aria-label="Upload booking form PDF"
               />
-              <label htmlFor="pdf-upload" className="cursor-pointer">
-                <Upload className="w-8 h-8 mx-auto mb-2 text-gray-400" />
+              <div className="pointer-events-none">
+                <Upload className="w-8 h-8 mx-auto mb-2 text-gray-400" aria-hidden />
                 {uploadedPdf ? (
                   <div className="text-sm">
-                    <p className="font-semibold text-green-600">✓ {uploadedPdf.name}</p>
+                    <p className="font-semibold text-green-700">✓ {uploadedPdf.name}</p>
                     <p className="text-gray-500 text-xs mt-1">{(uploadedPdf.size / 1024 / 1024).toFixed(2)} MB</p>
                   </div>
                 ) : (
                   <div className="text-sm text-gray-600">
-                    <p className="font-semibold">Click to upload PDF</p>
+                    <p className="font-semibold">Click or drop PDF here</p>
                     <p className="text-xs mt-1">Maximum file size: 10MB</p>
                   </div>
                 )}
-              </label>
+              </div>
+              {uploadedPdf && (
+                <button
+                  type="button"
+                  onClick={(ev) => {
+                    ev.preventDefault();
+                    ev.stopPropagation();
+                    setUploadedPdf(null);
+                    if (pdfInputRef.current) pdfInputRef.current.value = '';
+                  }}
+                  className="mt-3 text-xs text-red-600 hover:text-red-800 underline font-medium relative z-10"
+                >
+                  Remove file
+                </button>
+              )}
             </div>
           </div>
           <CustomFieldsRenderer sectionId={9} />
         </div>
       )
     }
-  ], [customFields, formData, projects, loading, units, formTemplates, agreementTemplates]);
+  ], [customFields, formData, projects, loading, units, formTemplates, agreementTemplates, uploadedPdf, assignBookingPdf]);
 
   const sectionsPerPage = isMobile ? 1 : 2;
   const totalPages = Math.ceil(sections.length / sectionsPerPage) + 1;
@@ -1292,6 +1433,12 @@ const BookingForm: React.FC = () => {
                               <div>
                                 <p className="text-xs text-gray-600 mb-1">Place</p>
                                 <p className="font-semibold text-gray-900">{formData.declarationPlace || 'Not provided'}</p>
+                              </div>
+                              <div className="md:col-span-2">
+                                <p className="text-xs text-gray-600 mb-1">Booking Form PDF</p>
+                                <p className="font-semibold text-gray-900">
+                                  {uploadedPdf ? uploadedPdf.name : 'Not uploaded'}
+                                </p>
                               </div>
                             </>
                           )}

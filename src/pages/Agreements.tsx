@@ -149,9 +149,14 @@ const Agreements: React.FC = () => {
     const fetchAgreements = async () => {
       try {
         setLoading(true);
-        const response = await bookingService.getAll({ status: 'approved' });
-        // Handle both array and paginated { data: [], meta: {} } response shapes
-        const list: Booking[] = Array.isArray(response) ? response : (response as unknown as { data: Booking[] }).data || [];
+        // Some backends use either `approved` or `agreement_generated` as the entry state for Agreements.
+        const [approvedRes, generatedRes] = await Promise.all([
+          bookingService.getAll({ status: 'approved' }).catch(() => []),
+          bookingService.getAll({ status: 'agreement_generated' as any }).catch(() => []),
+        ]);
+        const toArray = (res: unknown): Booking[] =>
+          Array.isArray(res) ? res : ((res as { data?: Booking[] })?.data ?? []);
+        const list: Booking[] = [...toArray(approvedRes), ...toArray(generatedRes)];
 
         // Map flat API fields to the nested Booking shape used by the UI
         const mapped = list.map((b) => {
